@@ -307,7 +307,9 @@ func decodePacket(data []byte) (*Packet, []byte) {
 			p.Value = DecodeInteger(value_data)
 		case TagBitString:
 		case TagOctetString:
-			p.Value = DecodeString(value_data)
+			// should not be interpreted as Unicode code point
+			// p.Value = DecodeString(value_data)
+			p.Value = string(value_data)
 		case TagNULL:
 		case TagObjectIdentifier:
 		case TagObjectDescriptor:
