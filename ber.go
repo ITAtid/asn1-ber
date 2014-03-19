@@ -108,20 +108,20 @@ var TypeMap = map[uint8]string{
 	TypeConstructed: "Constructed",
 }
 
-var Debug bool = false
+var Debug = false
 
 func PrintBytes(buf []byte, indent string) {
-	data_lines := make([]string, (len(buf)/30)+1)
-	num_lines := make([]string, (len(buf)/30)+1)
+	dataLines := make([]string, (len(buf)/30)+1)
+	numLines := make([]string, (len(buf)/30)+1)
 
 	for i, b := range buf {
-		data_lines[i/30] += fmt.Sprintf("%02x ", b)
-		num_lines[i/30] += fmt.Sprintf("%02d ", (i+1)%100)
+		dataLines[i/30] += fmt.Sprintf("%02x ", b)
+		numLines[i/30] += fmt.Sprintf("%02d ", (i+1)%100)
 	}
 
-	for i := 0; i < len(data_lines); i++ {
-		fmt.Print(indent + data_lines[i] + "\n")
-		fmt.Print(indent + num_lines[i] + "\n\n")
+	for i := 0; i < len(dataLines); i++ {
+		fmt.Print(indent + dataLines[i] + "\n")
+		fmt.Print(indent + numLines[i] + "\n\n")
 	}
 }
 
@@ -130,17 +130,17 @@ func PrintPacket(p *Packet) {
 }
 
 func printPacket(p *Packet, indent int, printBytes bool) {
-	indent_str := ""
-	for len(indent_str) != indent {
-		indent_str += " "
+	indentStr := ""
+	for len(indentStr) != indent {
+		indentStr += " "
 	}
 
-	class_str := ClassMap[p.ClassType]
-	tagtype_str := TypeMap[p.TagType]
-	tag_str := fmt.Sprintf("0x%02X", p.Tag)
+	classStr := ClassMap[p.ClassType]
+	tagtypeStr := TypeMap[p.TagType]
+	tagStr := fmt.Sprintf("0x%02X", p.Tag)
 
 	if p.ClassType == ClassUniversal {
-		tag_str = TagMap[p.Tag]
+		tagStr = TagMap[p.Tag]
 	}
 
 	value := fmt.Sprint(p.Value)
@@ -149,10 +149,10 @@ func printPacket(p *Packet, indent int, printBytes bool) {
 		description = p.Description + ": "
 	}
 
-	fmt.Printf("%s%s(%s, %s, %s) Len=%d %q\n", indent_str, description, class_str, tagtype_str, tag_str, p.Data.Len(), value)
+	fmt.Printf("%s%s(%s, %s, %s) Len=%d %q\n", indentStr, description, classStr, tagtypeStr, tagStr, p.Data.Len(), value)
 
 	if printBytes {
-		PrintBytes(p.Bytes(), indent_str)
+		PrintBytes(p.Bytes(), indentStr)
 	}
 
 	for _, child := range p.Children {
@@ -160,8 +160,8 @@ func printPacket(p *Packet, indent int, printBytes bool) {
 	}
 }
 
-func resizeBuffer(in []byte, new_size uint64) (out []byte) {
-	out = make([]byte, new_size)
+func resizeBuffer(in []byte, newSize uint64) (out []byte) {
+	out = make([]byte, newSize)
 	copy(out, in)
 	return
 }
@@ -288,12 +288,12 @@ func decodePacket(data []byte) (*Packet, []byte) {
 	p.Children = make([]*Packet, 0, 2)
 	p.Value = nil
 
-	value_data := data[datapos : datapos+datalen]
+	valueData := data[datapos : datapos+datalen]
 
 	if p.TagType == TypeConstructed {
-		for len(value_data) != 0 {
+		for len(valueData) != 0 {
 			var child *Packet
-			child, value_data = decodePacket(value_data)
+			child, valueData = decodePacket(valueData)
 			p.AppendChild(child)
 		}
 	} else if p.ClassType == ClassUniversal {
@@ -301,22 +301,22 @@ func decodePacket(data []byte) (*Packet, []byte) {
 		switch p.Tag {
 		case TagEOC:
 		case TagBoolean:
-			val := DecodeInteger(value_data)
+			val := DecodeInteger(valueData)
 			p.Value = val != 0
 		case TagInteger:
-			p.Value = DecodeInteger(value_data)
+			p.Value = DecodeInteger(valueData)
 		case TagBitString:
 		case TagOctetString:
 			// should not be interpreted as Unicode code point
-			// p.Value = DecodeString(value_data)
-			p.Value = string(value_data)
+			// p.Value = DecodeString(valueData)
+			p.Value = string(valueData)
 		case TagNULL:
 		case TagObjectIdentifier:
 		case TagObjectDescriptor:
 		case TagExternal:
 		case TagRealFloat:
 		case TagEnumerated:
-			p.Value = DecodeInteger(value_data)
+			p.Value = DecodeInteger(valueData)
 		case TagEmbeddedPDV:
 		case TagUTF8String:
 		case TagRelativeOID:
@@ -324,7 +324,7 @@ func decodePacket(data []byte) (*Packet, []byte) {
 		case TagSet:
 		case TagNumericString:
 		case TagPrintableString:
-			p.Value = DecodeString(value_data)
+			p.Value = DecodeString(valueData)
 		case TagT61String:
 		case TagVideotexString:
 		case TagIA5String:
@@ -351,12 +351,12 @@ func (p *Packet) DataLength() uint64 {
 func (p *Packet) Bytes() []byte {
 	var out bytes.Buffer
 	out.Write([]byte{p.ClassType | p.TagType | p.Tag})
-	packet_length := EncodeInteger(p.DataLength())
-	if p.DataLength() > 127 || len(packet_length) > 1 {
-		out.Write([]byte{byte(len(packet_length) | 128)})
-		out.Write(packet_length)
+	packetLength := EncodeInteger(p.DataLength())
+	if p.DataLength() > 127 || len(packetLength) > 1 {
+		out.Write([]byte{byte(len(packetLength) | 128)})
+		out.Write(packetLength)
 	} else {
-		out.Write(packet_length)
+		out.Write(packetLength)
 	}
 	out.Write(p.Data.Bytes())
 	return out.Bytes()
