@@ -262,6 +262,7 @@ func decodePacket(data []byte) (*Packet, []byte) {
 		ClassType: data[0] & ClassBitmask,
 		TagType:   data[0] & TypeBitmask,
 		Tag:       data[0] & TagBitmask,
+		Data:      new(bytes.Buffer),
 	}
 
 	datalen := DecodeInteger(data[1:2])
@@ -271,10 +272,6 @@ func decodePacket(data []byte) (*Packet, []byte) {
 		datapos += datalen
 		datalen = DecodeInteger(data[2 : 2+datalen])
 	}
-
-	p.Data = new(bytes.Buffer)
-	p.Children = make([]*Packet, 0, 2)
-	p.Value = nil
 
 	valueData := data[datapos : datapos+datalen]
 
@@ -360,13 +357,7 @@ func (p *Packet) Bytes() []byte {
 
 func (p *Packet) AppendChild(child *Packet) {
 	p.Data.Write(child.Bytes())
-	if len(p.Children) == cap(p.Children) {
-		newChildren := make([]*Packet, cap(p.Children)*2)
-		copy(newChildren, p.Children)
-		p.Children = newChildren[0:len(p.Children)]
-	}
-	p.Children = p.Children[0 : len(p.Children)+1]
-	p.Children[len(p.Children)-1] = child
+	p.Children = append(p.Children, child)
 }
 
 func Encode(classType, tagType, tag uint8, value interface{}, description string) *Packet {
@@ -375,7 +366,6 @@ func Encode(classType, tagType, tag uint8, value interface{}, description string
 		TagType:     tagType,
 		Tag:         tag,
 		Data:        new(bytes.Buffer),
-		Children:    make([]*Packet, 0, 2),
 		Value:       value,
 		Description: description,
 	}
