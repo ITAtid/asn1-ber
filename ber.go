@@ -166,23 +166,9 @@ func resizeBuffer(in []byte, newSize uint64) (out []byte) {
 	return
 }
 
-func readBytes(reader io.Reader, buf []byte) error {
-	idx := 0
-	buflen := len(buf)
-	for idx < buflen {
-		n, err := reader.Read(buf[idx:])
-		if err != nil {
-			return err
-		}
-		idx += n
-	}
-	return nil
-}
-
 func ReadPacket(reader io.Reader) (*Packet, error) {
 	buf := make([]byte, 2)
-	err := readBytes(reader, buf)
-	if err != nil {
+	if _, err := io.ReadFull(reader, buf); err != nil {
 		return nil, err
 	}
 	idx := uint64(2)
@@ -198,8 +184,7 @@ func ReadPacket(reader io.Reader) (*Packet, error) {
 		a := datalen - 128
 		idx += a
 		buf = resizeBuffer(buf, 2+a)
-		err := readBytes(reader, buf[2:])
-		if err != nil {
+		if _, err := io.ReadFull(reader, buf[2:]); err != nil {
 			return nil, err
 		}
 		datalen = DecodeInteger(buf[2 : 2+a])
@@ -213,8 +198,7 @@ func ReadPacket(reader io.Reader) (*Packet, error) {
 	}
 
 	buf = resizeBuffer(buf, idx+datalen)
-	err = readBytes(reader, buf[idx:])
-	if err != nil {
+	if _, err := io.ReadFull(reader, buf[idx:]); err != nil {
 		return nil, err
 	}
 
@@ -225,23 +209,26 @@ func ReadPacket(reader io.Reader) (*Packet, error) {
 		}
 	}
 
-	p := DecodePacket(buf)
-	return p, nil
+	return DecodePacket(buf), nil
 }
 
-func DecodeString(data []byte) (ret string) {
-	for _, c := range data {
-		ret += fmt.Sprintf("%c", c)
+// DecodeString returns a string version of data treating it as
+// ASCII rather than UTF-8.
+func DecodeString(data []byte) string {
+	runes := make([]rune, len(data))
+	for i, c := range data {
+		runes[i] = rune(c)
 	}
-	return
+	return string(runes)
 }
 
-func DecodeInteger(data []byte) (ret uint64) {
+func DecodeInteger(data []byte) uint64 {
+	var ret uint64
 	for _, i := range data {
-		ret = ret * 256
-		ret = ret + uint64(i)
+		ret <<= 8
+		ret += uint64(i)
 	}
-	return
+	return ret
 }
 
 func EncodeInteger(val uint64) []byte {
@@ -271,10 +258,11 @@ func decodePacket(data []byte) (*Packet, []byte) {
 	if Debug {
 		fmt.Printf("decodePacket: enter %d\n", len(data))
 	}
-	p := new(Packet)
-	p.ClassType = data[0] & ClassBitmask
-	p.TagType = data[0] & TypeBitmask
-	p.Tag = data[0] & TagBitmask
+	p := &Packet{
+		ClassType: data[0] & ClassBitmask,
+		TagType:   data[0] & TypeBitmask,
+		Tag:       data[0] & TagBitmask,
+	}
 
 	datalen := DecodeInteger(data[1:2])
 	datapos := uint64(2)
@@ -349,17 +337,25 @@ func (p *Packet) DataLength() uint64 {
 }
 
 func (p *Packet) Bytes() []byte {
-	var out bytes.Buffer
-	out.Write([]byte{p.ClassType | p.TagType | p.Tag})
-	packetLength := EncodeInteger(p.DataLength())
-	if p.DataLength() > 127 || len(packetLength) > 1 {
-		out.Write([]byte{byte(len(packetLength) | 128)})
-		out.Write(packetLength)
-	} else {
-		out.Write(packetLength)
+	n := p.DataLength()
+	packetLength := EncodeInteger(n)
+	size := 1 + len(packetLength) + int(n)
+	isBig := n > 127 || len(packetLength) > 1
+	if isBig {
+		size++
 	}
-	out.Write(p.Data.Bytes())
-	return out.Bytes()
+
+	out := make([]byte, size)
+	out[0] = p.ClassType | p.TagType | p.Tag
+	offset := 2
+	if isBig {
+		out[1] = byte(len(packetLength) | 128)
+		offset += copy(out[2:], packetLength)
+	} else {
+		out[1] = packetLength[0]
+	}
+	copy(out[offset:], p.Data.Bytes())
+	return out
 }
 
 func (p *Packet) AppendChild(child *Packet) {
@@ -373,21 +369,22 @@ func (p *Packet) AppendChild(child *Packet) {
 	p.Children[len(p.Children)-1] = child
 }
 
-func Encode(ClassType, TagType, Tag uint8, Value interface{}, Description string) *Packet {
-	p := new(Packet)
-	p.ClassType = ClassType
-	p.TagType = TagType
-	p.Tag = Tag
-	p.Data = new(bytes.Buffer)
-	p.Children = make([]*Packet, 0, 2)
-	p.Value = Value
-	p.Description = Description
+func Encode(classType, tagType, tag uint8, value interface{}, description string) *Packet {
+	p := &Packet{
+		ClassType:   classType,
+		TagType:     tagType,
+		Tag:         tag,
+		Data:        new(bytes.Buffer),
+		Children:    make([]*Packet, 0, 2),
+		Value:       value,
+		Description: description,
+	}
 
-	if Value != nil {
-		v := reflect.ValueOf(Value)
+	if value != nil {
+		v := reflect.ValueOf(value)
 
-		if ClassType == ClassUniversal {
-			switch Tag {
+		if classType == ClassUniversal {
+			switch tag {
 			case TagOctetString:
 				sv, ok := v.Interface().(string)
 				if ok {
@@ -400,32 +397,32 @@ func Encode(ClassType, TagType, Tag uint8, Value interface{}, Description string
 	return p
 }
 
-func NewSequence(Description string) *Packet {
-	return Encode(ClassUniversal, TypePrimative, TagSequence, nil, Description)
+func NewSequence(description string) *Packet {
+	return Encode(ClassUniversal, TypePrimative, TagSequence, nil, description)
 }
 
-func NewBoolean(ClassType, TagType, Tag uint8, Value bool, Description string) *Packet {
+func NewBoolean(classType, tagType, tag uint8, value bool, description string) *Packet {
 	intValue := 0
-	if Value {
+	if value {
 		intValue = 1
 	}
 
-	p := Encode(ClassType, TagType, Tag, nil, Description)
-	p.Value = Value
+	p := Encode(classType, tagType, tag, nil, description)
+	p.Value = value
 	p.Data.Write(EncodeInteger(uint64(intValue)))
 	return p
 }
 
-func NewInteger(ClassType, TagType, Tag uint8, Value uint64, Description string) *Packet {
-	p := Encode(ClassType, TagType, Tag, nil, Description)
-	p.Value = Value
-	p.Data.Write(EncodeInteger(Value))
+func NewInteger(classType, tagType, tag uint8, value uint64, description string) *Packet {
+	p := Encode(classType, tagType, tag, nil, description)
+	p.Value = value
+	p.Data.Write(EncodeInteger(value))
 	return p
 }
 
-func NewString(ClassType, TagType, Tag uint8, Value, Description string) *Packet {
-	p := Encode(ClassType, TagType, Tag, nil, Description)
-	p.Value = Value
-	p.Data.Write([]byte(Value))
+func NewString(classType, tagType, tag uint8, value, description string) *Packet {
+	p := Encode(classType, tagType, tag, nil, description)
+	p.Value = value
+	p.Data.Write([]byte(value))
 	return p
 }
